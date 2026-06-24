@@ -1,36 +1,36 @@
-# 手柄遥操机械臂——直观的机械臂控制新体验
+# Gamepad Teleoperation for Robotic Arm—A New Intuitive Control Experience
 
-## 摘要
+## Abstract
 
-本文通过游戏手柄实现直观的机械臂控制。使用标准的游戏手柄，您可以在可视化环境中操控PiPER机械臂，带来精准而直观的控制体验。
+This project enables intuitive robotic arm control using a standard gamepad. With a conventional game controller, you can operate the PiPER robotic arm in a visual environment, delivering precise and intuitive control.
 
-## 标签
-PiPER机械臂、手柄遥操、关节控制、位姿控制、夹爪控制、运动学正逆解
+## Tags
+PiPER Robotic Arm, Gamepad Teleoperation, Joint Control, Pose Control, Gripper Control, Forward/Inverse Kinematics
 
-## 仓库
+## Repository
 
-- **导航仓库**: https://github.com/agilexrobotics/Agilex-College
-- **项目仓库**: https://github.com/kehuanjack/Gamepad_PiPER
+- **Navigation**: https://github.com/agilexrobotics/Agilex-College
+- **Project**: https://github.com/kehuanjack/Gamepad_PiPER
 
-## 功能演示
+## Feature Demonstration
 
 [![](https://i.ytimg.com/an_webp/smTTbOfdTlk/mqdefault_6s.webp?du=3000&sqp=CJXS7McG&rs=AOn4CLBfiWjTsfz7kRpplE8f4Wx6WtDRlg)](https://youtu.be/smTTbOfdTlk)
 
-## 环境配置
-- 操作系统：Ubuntu 20.04或更高版本
+## Environment Setup
+- Operating System: Ubuntu 20.04 or higher
 
-- Python环境：Python 3.9或更高版本，推荐使用Anaconda或Miniconda
+- Python Environment: Python 3.9 or higher, recommended to use Anaconda or Miniconda
 
-- 克隆项目并切换至项目根目录下：
+- Clone the project and navigate to the project root directory:
 
    ```bash
    git clone https://github.com/kehuanjack/Gamepad_PiPER.git
    cd Gamepad_PiPER
    ```
 
-- 安装通用的依赖库和运动学模块的依赖库（四选一，推荐使用pytracik库）：
+- Install the general dependency libraries and the dependency libraries for the kinematics module (choose one, pytracik library is recommended):
 
-   - 基于[pinocchio](https://github.com/stack-of-tasks/pinocchio)库（Python == 3.9，需要安装[piper_ros](https://github.com/agilexrobotics/piper_ros)，并source机械臂的ros工作空间，否则会找不到meshes文件）：
+   - Based on the [pinocchio](https://github.com/stack-of-tasks/pinocchio) library (Python == 3.9, requires installing [piper_ros](https://github.com/agilexrobotics/piper_ros) and sourcing the robotic arm's ROS workspace; otherwise, mesh files will not be found.):
 
       ```bash
       conda create -n test_pinocchio python=3.9.* -y
@@ -41,9 +41,9 @@ PiPER机械臂、手柄遥操、关节控制、位姿控制、夹爪控制、运
       pip install casadi
       ```
 
-      需要在`main.py`和`main_virtual.py`文件中选择`from src.gamepad_pin import RoboticArmController`
+      You need to select `from src.gamepad_pin import RoboticArmController` in the `main.py` and `main_virtual.py` files.
 
-   - 基于[PyRoKi](https://github.com/chungmin99/pyroki)库（Python >= 3.10）:
+   - Based on the [PyRoKi](https://github.com/chungmin99/pyroki) library (Python >= 3.10):
 
       ```bash
       conda create -n test_pyroki python=3.10.* -y
@@ -52,9 +52,9 @@ PiPER机械臂、手柄遥操、关节控制、位姿控制、夹爪控制、运
       pip3 install pyroki@git+https://github.com/chungmin99/pyroki.git@f234516
       ```
 
-      需要在`main.py`和`main_virtual.py`文件中选择`from src.gamepad_limit import RoboticArmController`或`from src.gamepad_no_limit import RoboticArmController`
+      You need to select `from src.gamepad_limit import RoboticArmController` or `from src.gamepad_no_limit import RoboticArmController` in the `main.py` and `main_virtual.py` files.
 
-   - 基于[cuRobo](https://github.com/NVlabs/curobo)库（Python >= 3.8，推荐的CUDA版本为11.8）:
+   - Based on the [cuRobo](https://github.com/NVlabs/curobo) library (Python >= 3.8, recommended CUDA version is 11.8):
 
       ```bash
       conda create -n test_curobo python=3.10.* -y
@@ -68,9 +68,9 @@ PiPER机械臂、手柄遥操、关节控制、位姿控制、夹爪控制、运
       cd ../Gamepad_PiPER
       ```
 
-      需要在`main.py`和`main_virtual.py`文件中选择`from src.gamepad_curobo import RoboticArmController`
+      You need to select `from src.gamepad_curobo import RoboticArmController` in the `main.py` and `main_virtual.py` files.
 
-   - 基于[pytracik](https://github.com/chenhaox/pytracik)库（Python >= 3.10）:
+   - Based on the [pytracik](https://github.com/chenhaox/pytracik)library（Python >= 3.10）:
 
       ```bash
       conda create -n test_tracik python=3.10.* -y
@@ -83,70 +83,70 @@ PiPER机械臂、手柄遥操、关节控制、位姿控制、夹爪控制、运
       python setup_linux.py install --user
       ```
 
-      需要在`main.py`和`main_virtual.py`文件中选择`from src.gamepad_trac_ik import RoboticArmController`
+      You need to select `from src.gamepad_trac_ik import RoboticArmController` in the `main.py` and `main_virtual.py` files.
 
-## 执行步骤
+## Execution Steps
 
-1. **连接机械臂并激活CAN模块**：`sudo ip link set can0 up type can bitrate 1000000`
+1. **Connect the robotic arm and activate the CAN module**: `sudo ip link set can0 up type can bitrate 1000000`
 
-2. **连接游戏手柄**：将手柄通过USB或蓝牙连接到电脑
+2. **Connect the gamepad**: Connect the controller to the computer via USB or Bluetooth
 
-3. **启用控制服务**：在项目目录下运行`python3 main.py`或`python3 main_virtual.py`，建议先运行`main_virtual.py`进行虚拟机械臂测试
+3. **Enable control service**: Run `python3 main.py` or `python3 main_virtual.py` in the project directory. It is recommended to run `main_virtual.py` first for virtual arm testing
 
-4. **手柄连接验证**：程序启动后，检查控制台输出确认手柄已正确识别
+4. **Gamepad connection verification**: After the program starts, check the console output to confirm the gamepad is correctly recognized
 
-5. **网页可视化**：打开浏览器，输入`http://localhost:8080`访问网页，可视化显示机械臂状态
+5. **Web visualization**: Open a browser and enter `http://localhost:8080` to access the web interface and visualize the robotic arm status
 
-6. **开始控制**：按照手柄映射说明操作机械臂
+6. **Start controlling**: Operate the robotic arm according to the gamepad mapping instructions
 
-## 手柄控制说明
+## Gamepad Control Instructions
 
-### 按钮功能映射
+### Button Function Mapping
 
-| 按钮 | 短按功能 | 长按功能 |
-|------|----------|----------|
-| **HOME** | 连接/断开机械臂 | 无 |
-| **START** | 切换上层的控制模式（关节/位姿）| 切换底层的控制模式（关节/位姿）|
-| **BACK** | 切换底层的命令模式（位置速度0x00/快速响应0xAD）| 无 |
-| **Y** | 回零位置 | 无 |
-| **A** | 保存当前位置 | 清除当前保存的位置 |
-| **B** | 恢复上一个保存的位置 | 无 |
-| **X** | 切换位置回放顺序 | 清除所有保存的位置 |
-| **LB** | 增加速度因子（上层） | 减少速度因子（上层） |
-| **RB** | 增加移动速度（底层） | 减少移动速度（底层） |
+| Button | Short Press Function | Long Press Function |
+|--------|----------------------|---------------------|
+| **HOME** | Connect/Disconnect robotic arm | None |
+| **START** | Switch upper control mode (Joint/Pose) | Switch lower control mode (Joint/Pose) |
+| **BACK** | Switch lower command mode (Position Velocity 0x00/Quick Response 0xAD) | None |
+| **Y** | Return to zero position | None |
+| **A** | Save current position | Clear current saved position |
+| **B** | Restore last saved position | None |
+| **X** | Toggle position playback order | Clear all saved positions |
+| **LB** | Increase speed factor (upper) | Decrease speed factor (upper) |
+| **RB** | Increase movement speed (lower) | Decrease movement speed (lower) |
 
-### 摇杆与扳机功能
+### Joystick and Trigger Functions
 
-| 控制元件 | 关节模式功能 | 位姿模式功能 |
-|----------|--------------|--------------|
-| **左摇杆** | J1（底座旋转）：左右<br/>J2（大臂）：上下 | 末端X/Y轴移动 |
-| **右摇杆** | J3（小臂）：上下<br/>J6（腕部旋转）：左右 | 末端Z轴移动和绕Z轴旋转 |
-| **方向键** | J4（腕部偏航）：左右<br/>J5（腕部俯仰）：上下 | 末端绕X/Y轴旋转 |
-| **左扳机 (LT)** | 关闭夹爪 | 关闭夹爪 |
-| **右扳机 (RT)** | 打开夹爪 | 打开夹爪 |
+| Control Element | Joint Mode Function | Pose Mode Function |
+|-----------------|---------------------|--------------------|
+| **Left Joystick** | J1 (Base rotation): Left/Right<br/>J2 (Shoulder): Up/Down | End-effector X/Y axis movement |
+| **Right Joystick** | J3 (Elbow): Up/Down<br/>J6 (Wrist rotation): Left/Right | End-effector Z axis movement and rotation around Z axis |
+| **D-pad** | J4 (Wrist yaw): Left/Right<br/>J5 (Wrist pitch): Up/Down | End-effector rotation around X/Y axes |
+| **Left Trigger (LT)** | Close gripper | Close gripper |
+| **Right Trigger (RT)** | Open gripper | Open gripper |
 
-### 特殊功能说明
+### Special Function Notes
 
-1. **夹爪控制**:
-   - 夹爪开合程度范围: 0-100%
-   - 特殊跳变功能: 当夹爪处于完全关闭（0%）或完全打开（100%）状态时，快速按下并释放扳机可实现状态跳变
+1. **Gripper Control**:
+   - Gripper opening range: 0-100%
+   - Special toggle function: When the gripper is fully closed (0%) or fully open (100%), quickly pressing and releasing the trigger toggles the state
 
-2. **速度控制**:
-   - 速度因子: 0.25x, 0.5x, 1.0x, 2.0x, 3.0x, 4.0x, 5.0x（通过LB切换）
-   - 移动速度: 10%-100%（通过RB切换）
+2. **Speed Control**:
+   - Speed factors: 0.25x, 0.5x, 1.0x, 2.0x, 3.0x, 4.0x, 5.0x (switched with LB)
+   - Movement speed: 10%-100% (switched with RB)
 
-3. **位置记忆**:
-   - 可保存多个位置点
-   - 支持顺序和逆序回放
+3. **Position Memory**:
+   - Multiple position points can be saved
+   - Supports sequential and reverse order playback
 
-## 注意事项
+## Important Notes
 
-- 可以先运行`main_virtual.py`进行虚拟机械臂测试
-- 初次使用建议从低速模式开始，熟悉操作后再提高速度
-- 机械臂运行期间请保持安全距离，切勿靠近运动中的机械臂，否则后果自负
-- 数值解在接近临界点时可能出现大幅度的关节跳动，请保持安全距离，否则后果自负
-- 快速响应模式（0xAD）很危险，请谨慎使用，如要使用请保持安全距离，否则后果自负
-- 如果选择使用pinocchio库，需要提前source机械臂的ros工作空间，否则会找不到meshes文件
+- You can run `main_virtual.py` first for virtual robotic arm testing
+- For first-time use, start with low-speed mode and increase speed after familiarizing yourself with the operation
+- Maintain a safe distance during robotic arm operation. Do not approach the moving robotic arm. Proceed at your own risk.
+- Numerical solutions may cause significant joint jumps near critical points. Maintain a safe distance. Proceed at your own risk.
+- Quick response mode (0xAD) is dangerous. Use with extreme caution. Maintain a safe distance if used. Proceed at your own risk.
+- If using the pinocchio library, you need to source the robotic arm's ROS workspace in advance; otherwise, mesh files will not be found.
 
 ## Star History
 
