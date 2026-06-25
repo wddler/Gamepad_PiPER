@@ -4,4 +4,5 @@ yourdfpy
 piper_sdk
 pygame<2.6.2
 numpy<=1.26.0
+websockets
 setuptools<80.9.0

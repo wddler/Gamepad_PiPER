@@ -93,7 +93,9 @@ PiPER Robotic Arm, Gamepad Teleoperation, Joint Control, Pose Control, Gripper C
 
 3. **Enable control service**: Run `python3 main.py` or `python3 main_virtual.py` in the project directory. It is recommended to run `main_virtual.py` first for virtual arm testing
 
-4. **Gamepad connection verification**: After the program starts, check the console output to confirm the gamepad is correctly recognized
+4. **Remote gamepad control**: If the gamepad is connected to a remote laptop, run `python3 remote_server.py` on the Raspberry Pi and `python3 remote_client.py --host <pi_ip> --port 8765` on the laptop.
+
+5. **Gamepad connection verification**: After the program starts, check the console output to confirm the gamepad is correctly recognized
 
 5. **Web visualization**: Open a browser and enter `http://localhost:8080` to access the web interface and visualize the robotic arm status
 

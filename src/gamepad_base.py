@@ -60,6 +60,24 @@ class GamepadBase:
         # Detect system platform
         self.system_platform = pygame.display.get_driver()
 
+        # Detect existing joystick at startup
+        self.joystick = None
+        self.joystick_connected = False
+        self.remote_enabled = False
+        self.remote_inputs = {
+            "axes": {},
+            "buttons": {},
+            "hat": {"dpad": (0, 0)}
+        }
+        if pygame.joystick.get_count() > 0:
+            try:
+                self.joystick = pygame.joystick.Joystick(0)
+                self.joystick.init()
+                self.joystick_connected = True
+            except Exception:
+                self.joystick = None
+                self.joystick_connected = False
+
         # Robot arm status
         self.joint_angles = np.zeros(6)
         self.up_level_mode = "joint"
@@ -113,10 +131,6 @@ class GamepadBase:
         self.lb_pressed_time = 0
         self.rb_pressed_time = 0
         self.long_press_threshold = 0.3  # Long press time threshold (seconds)
-
-        # Joystick connection status
-        self.joystick = None
-        self.joystick_connected = False
 
         # Create button objects
         self.buttons = {
@@ -186,6 +200,9 @@ class GamepadBase:
 
     def _handle_joystick_events(self):
         """Handle joystick connection/disconnection events"""
+        if self.remote_enabled:
+            return True
+
         for event in pygame.event.get():
             if event.type == pygame.JOYDEVICEADDED:
                 try:
@@ -203,12 +220,55 @@ class GamepadBase:
 
         return self.joystick_connected
 
+    def enable_remote_input(self, enable: bool = True):
+        """Enable or disable remote input mode."""
+        self.remote_enabled = enable
+        if not enable:
+            self.remote_inputs = {
+                "axes": {},
+                "buttons": {},
+                "hat": {"dpad": (0, 0)}
+            }
+
+    def set_remote_inputs(self, remote_inputs):
+        """Set the current remote joystick state."""
+        if not isinstance(remote_inputs, dict):
+            return
+        axes = remote_inputs.get("axes", {})
+        buttons = remote_inputs.get("buttons", {})
+        hat = remote_inputs.get("hat", {"dpad": (0, 0)})
+        if isinstance(hat.get("dpad"), list):
+            hat_value = tuple(hat.get("dpad"))
+        else:
+            hat_value = hat.get("dpad", (0, 0))
+
+        self.remote_inputs = {
+            "axes": axes,
+            "buttons": buttons,
+            "hat": {"dpad": hat_value}
+        }
+
+    def _get_button_state(self, button_name):
+        """Get button state from joystick or remote input."""
+        if self.remote_enabled:
+            return bool(self.remote_inputs.get("buttons", {}).get(button_name, False))
+
+        if button_name not in self.button_map:
+            return False
+        button_id = self.button_map[button_name]
+        if self.joystick is None or button_id >= self.joystick.get_numbuttons():
+            return False
+        return bool(self.joystick.get_button(button_id))
+
     def _apply_deadzone(self, value):
         """Apply deadzone filtering"""
         return value if abs(value) > self.deadzone else 0
 
     def _get_axis_value(self, axis_name):
         """Get axis value"""
+        if self.remote_enabled:
+            return float(self.remote_inputs.get("axes", {}).get(axis_name, 0.0))
+
         if axis_name not in self.axis_map:
             return 0
 
@@ -226,6 +286,9 @@ class GamepadBase:
 
     def _get_hat_value(self, hat_name):
         """Get hat switch value"""
+        if self.remote_enabled:
+            return tuple(self.remote_inputs.get("hat", {}).get(hat_name, (0, 0)))
+
         if hat_name not in self.hat_map:
             return (0, 0)
 
@@ -416,7 +479,7 @@ class GamepadBase:
 
         # Check X button
         if 'x' in self.button_map:
-            x_pressed = self.joystick.get_button(self.button_map['x'])
+            x_pressed = self._get_button_state('x')
             if x_pressed and self.x_pressed_time == 0:
                 self.x_pressed_time = current_time
             elif not x_pressed and self.x_pressed_time > 0:
@@ -428,7 +491,7 @@ class GamepadBase:
                 self.x_pressed_time = 0
 
         if 'a' in self.button_map:
-            a_pressed = self.joystick.get_button(self.button_map['a'])
+            a_pressed = self._get_button_state('a')
             if a_pressed and self.a_pressed_time == 0:
                 self.a_pressed_time = current_time
             elif not a_pressed and self.a_pressed_time > 0:
@@ -440,7 +503,7 @@ class GamepadBase:
                 self.a_pressed_time = 0
 
         if 'start' in self.button_map:
-            start_pressed = self.joystick.get_button(self.button_map['start'])
+            start_pressed = self._get_button_state('start')
             if start_pressed and self.start_pressed_time == 0:
                 self.start_pressed_time = current_time
             elif not start_pressed and self.start_pressed_time > 0:
@@ -453,7 +516,7 @@ class GamepadBase:
 
         # Check LB button
         if 'lb' in self.button_map:
-            lb_pressed = self.joystick.get_button(self.button_map['lb'])
+            lb_pressed = self._get_button_state('lb')
             if lb_pressed and self.lb_pressed_time == 0:
                 self.lb_pressed_time = current_time
             elif not lb_pressed and self.lb_pressed_time > 0:
@@ -466,7 +529,7 @@ class GamepadBase:
 
         # Check RB button
         if 'rb' in self.button_map:
-            rb_pressed = self.joystick.get_button(self.button_map['rb'])
+            rb_pressed = self._get_button_state('rb')
             if rb_pressed and self.rb_pressed_time == 0:
                 self.rb_pressed_time = current_time
             elif not rb_pressed and self.rb_pressed_time > 0:
@@ -627,11 +690,8 @@ class GamepadBase:
                 if name not in self.button_map:
                     continue
 
-                button_id = self.button_map[name]
-                if button_id >= self.joystick.get_numbuttons():
-                    continue
-
-                pressed = button.update(self.joystick.get_button(button_id))
+                button_pressed = self._get_button_state(name)
+                pressed = button.update(button_pressed)
                 if pressed:
                     button_events[name] = True
 
@@ -662,7 +722,9 @@ class GamepadBase:
             "xyz_rpy": self.xyz_rpy.copy(),
             "gripper": self.gripper_state,
             "speed_factor": self.speed_factors[self.speed_factor_index],
+            "speed_factor_index": self.speed_factor_index,
             "movement_speed": self.movement_speeds[self.movement_speed_index],
+            "movement_speed_index": self.movement_speed_index,
             "arm_connected": self.arm_connected,
             "arm_enabled": self.arm_enabled,
             "command_mode": self.command_mode,
@@ -670,6 +732,17 @@ class GamepadBase:
             "low_level_mode": self.low_level_mode,
             "joystick_connected": self.joystick_connected
         }
+
+    def apply_remote_state(self, state):
+        """Apply state received from a remote gamepad client."""
+        self.joint_angles = np.array(state.get("joints", self.joint_angles), dtype=float)
+        self.xyz_rpy = np.array(state.get("xyz_rpy", self.xyz_rpy), dtype=float)
+        self.gripper_state = float(state.get("gripper", self.gripper_state))
+        self.speed_factor_index = int(state.get("speed_factor_index", self.speed_factor_index))
+        self.movement_speed_index = int(state.get("movement_speed_index", self.movement_speed_index))
+        self.command_mode = int(state.get("command_mode", self.command_mode))
+        self.up_level_mode = state.get("up_level_mode", self.up_level_mode)
+        self.low_level_mode = state.get("low_level_mode", self.low_level_mode)
 
     def print_state(self):
         """Print current status of robot arm"""
