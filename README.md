@@ -105,9 +105,9 @@ PiPER Robotic Arm, Gamepad Teleoperation, Joint Control, Pose Control, Gripper C
 
 | Button | Short Press Function | Long Press Function |
 |--------|----------------------|---------------------|
-| **HOME** | Connect/Disconnect robotic arm | None |
-| **START** | Switch upper control mode (Joint/Pose) | Switch lower control mode (Joint/Pose) |
-| **BACK** | Switch lower command mode (Position Velocity 0x00/Quick Response 0xAD) | None |
+| **Xbox** | Connect/Disconnect robotic arm | None |
+| **Menu ($\equiv$)** | Switch upper control mode (Joint/Pose) | Switch lower control mode (Joint/Pose) |
+| **View ($\square\mkern-5mu\square$)** | Switch lower command mode (Position Velocity 0x00/Quick Response 0xAD) | None |
 | **Y** | Return to zero position | None |
 | **A** | Save current position | Clear current saved position |
 | **B** | Restore last saved position | None |
