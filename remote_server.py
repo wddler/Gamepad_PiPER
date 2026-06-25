@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import time
+import traceback
 
 import numpy as np
 import websockets
@@ -25,8 +26,12 @@ async def websocket_handler(websocket, path, controller):
                 print("Invalid json payload received from remote client")
             except Exception as e:
                 print(f"Error parsing remote input: {e}")
-    except websockets.exceptions.ConnectionClosed:
-        pass
+                traceback.print_exc()
+    except websockets.exceptions.ConnectionClosed as e:
+        print(f"Websocket connection closed: {e}")
+    except Exception as e:
+        print(f"Unexpected websocket handler error: {e}")
+        traceback.print_exc()
     finally:
         print("Remote client disconnected")
         controller.enable_remote_input(False)
@@ -34,8 +39,8 @@ async def websocket_handler(websocket, path, controller):
 
 async def control_loop(controller, robot_interface, interval=0.05):
     """Run the robot control loop while remote inputs are active."""
-    try:
-        while True:
+    while True:
+        try:
             controller.update()
             state = controller.get_state()
             controller.print_state()
@@ -62,9 +67,14 @@ async def control_loop(controller, robot_interface, interval=0.05):
                 gripper_value = int(controller.gripper_max_width * gripper_state * 1e4)
                 robot_interface.GripperCtrl(gripper_value, 3000, 0x01, 0)
 
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Error in control loop: {e}")
+            traceback.print_exc()
+            await asyncio.sleep(1.0)
+        finally:
             await asyncio.sleep(interval)
-    except asyncio.CancelledError:
-        pass
 
 
 def get_current_path():
