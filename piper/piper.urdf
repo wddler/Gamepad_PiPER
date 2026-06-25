@@ -5,7 +5,7 @@
 <robot
   name="piper">
 
-  <!-- 新增的虚拟根链接（无惯性），KDL动力学库不支持为根链接设置惯性属性 -->
+  <!-- Added virtual root link (no inertia). KDL dynamics library does not support setting inertia properties for root links -->
   <link
     name="base_footprint">
     <visual>
@@ -23,7 +23,7 @@
     </visual>
   </link>
   
-  <!-- 固定关节连接虚拟根链接和原来的base_link -->
+  <!-- Fixed joint connecting virtual root link and original base_link -->
   <joint
     name="base_footprint_joint"
     type="fixed">

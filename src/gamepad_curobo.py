@@ -28,7 +28,7 @@ class RoboticArmController(GamepadBase):
         result = self.kinematic.solve_ik(xyz, wxyz)
         if result is not None:
             joint_angles = np.array(result[:6])
-            # 计算关节1角度变化量
+            # Calculate joint 1 angle change
             if np.abs(joint_angles[0] - self.joint_angles[0]) < np.radians(170):
                 self.joint_angles = joint_angles
                 self.xyz_wxyz = np.concatenate((xyz, wxyz))
