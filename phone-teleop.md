@@ -1,83 +1,82 @@
+# Creative Project: Controlling a Robotic Arm with a Smartphone Gyroscope
 
-# 脑洞大开之用手机陀螺仪控制机械臂
+## Abstract
+This project implements controlling a robotic arm using smartphone sensor data (accelerometer, gyroscope, magnetometer). The data is transmitted in real-time from the smartphone to a local Python script via WebSockets, and the script controls the robotic arm's movement after solving the attitude/orientation.
 
-## 摘要
-本文实现了通过手机传感器数据（加速度计、陀螺仪、磁力计）控制机械臂的功能。数据通过 WebSocket 从手机实时传输到本地 Python 脚本，脚本经姿态解算后控制机械臂运动。
+## Tags
+Smartphone Sensors, Attitude Teleoperation, Gyroscope, Attitude Estimation, EKF
 
-## 标签
-手机传感器、姿态遥操、陀螺仪、姿态解算、EKF
+## Code Repository
+GitHub Link: [https://github.com/agilexrobotics/Agilex-College/tree/master/piper/mobilePhoneCtl](https://github.com/agilexrobotics/Agilex-College/tree/master/piper/mobilePhoneCtl)
 
-## 代码仓库
-github链接：[https://github.com/agilexrobotics/Agilex-College/tree/master/piper/mobilePhoneCtl](https://github.com/agilexrobotics/Agilex-College/tree/master/piper/mobilePhoneCtl)
-
-## 功能演示
+## Demo
 
 [![](https://i.ytimg.com/vi/WMK5KRgzJXU/oar2.jpg?sqp=-oaymwEoCJgDENAFSFqQAgHyq4qpAxcIARUAAIhC2AEB4gEKCBgQAhgGOAFAAQ==&rs=AOn4CLAjvJ9nijQAz4FoncwwMIaFZuV94g)](https://www.youtube.com/shorts/WMK5KRgzJXU)
 
-## 环境配置
+## Environment Configuration
 
-- 操作系统：Ubuntu（推荐Ubuntu 18.04或更高版本）
-- Python环境：Python 3.7或更高版本
+- Operating System: Ubuntu (Ubuntu 18.04 or higher recommended)
+- Python Environment: Python 3.7 or higher
 
-- 克隆项目：
+- Clone the project:
 
     ```bash
     git clone https://github.com/agilexrobotics/Agilex-College.git
     cd Agilex-College/piper/mobilePhoneCtl/
     ```
 
-- 安装依赖库：
+- Install dependencies:
 
     ```bash
     pip install -r requirements.txt --upgrade
     ```
 
-- 确保已正确安装并配置 `piper_sdk` 及其硬件依赖。
+- Ensure that `piper_sdk` and its hardware dependencies are correctly installed and configured.
 
-## 手机 App 安装
+## Smartphone App Installation
 
-本项目推荐使用 [Sensor Stream IMU+](https://www.sensorstream.app/)（付费 App）进行手机端数据采集与推送。
+This project recommends using [Sensor Stream IMU+](https://www.sensorstream.app/) (paid App) for data collection and streaming on the phone.
 
-- 前往官网或应用商店购买并安装 Sensor Stream IMU+。
-- 该 App 支持 iOS 和 Android。
+- Go to the official website or app store to purchase and install Sensor Stream IMU+.
+- This App supports both iOS and Android.
 
-## App 使用方法
+## App Usage Instructions
 
-1. 打开 Sensor Stream IMU+ App。
-2. 在“Set IP Address”处输入运行本脚本的电脑 IP 地址和端口（默认 5000），如 `192.168.1.100:5000`。
-3. 选择要推送的传感器（Accelerometer、Gyroscope、Magnetometer）。
-4. 设置合适的 update interval（如 20ms）。
-5. 点击“Start Streaming”开始推送数据。
+1. Open the Sensor Stream IMU+ App.
+2. Enter the IP address and port (default 5000) of the computer running this script in "Set IP Address", e.g., `192.168.1.100:5000`.
+3. Select the sensors to stream (Accelerometer, Gyroscope, Magnetometer).
+4. Set an appropriate update interval (e.g., 20ms).
+5. Tap "Start Streaming" to start sending data.
 
-## Python 脚本使用
+## Python Script Usage
 
-1. 连接机械臂并激活CAN模块。
+1. Connect the robotic arm and bring up the CAN interface.
 
     ```bash
     sudo ip link set can0 up type can bitrate 1000000
     ```
 
-2. 运行本目录下的 `main.py`：
+2. Run `main.py` in this directory:
 
     ```bash
     python3 main.py
     ```
 
-3. 脚本启动后会显示本机 IP 地址和端口，请在 App 中填写一致。
-4. 当 App 开始推送数据后，脚本会自动进行姿态解算，并通过 `piper_sdk` 控制机械臂末端姿态。
+3. Once started, the script will display the local IP address and port. Enter these exact values in the App.
+4. When the App starts streaming data, the script will automatically compute the orientation and control the robotic arm's end-effector attitude via `piper_sdk`.
 
-## 数据传输与机械臂控制说明
+## Data Transmission and Robotic Arm Control Details
 
-- 手机端通过 WebSocket 实时推送三轴加速度、陀螺仪和磁力计数据到 Python 脚本。
-- 脚本使用扩展卡尔曼滤波（EKF）算法进行姿态解算，获得欧拉角（roll, pitch, yaw）。
-- 解算结果实时通过 `piper_sdk` 的 `EndPoseCtrl` 接口发送给机械臂，实现姿态控制。
+- The smartphone sends 3-axis accelerometer, gyroscope, and magnetometer data in real-time to the Python script via WebSockets.
+- The script uses the Extended Kalman Filter (EKF) algorithm for attitude estimation to obtain Euler angles (roll, pitch, yaw).
+- The computed orientation is sent in real-time to the robotic arm via the `EndPoseCtrl` interface of `piper_sdk` to achieve attitude control.
 
-## 注意事项
+## Important Notes
 
-- 请确保手机和电脑处于同一局域网内，且防火墙允许 5000 端口通信。
-- 机械臂运动前请确保安全，避免碰撞。
-- 若需修改端口或初始位置，请编辑 [`main.py`](main.py) 中相关参数。
+- Make sure that the smartphone and the computer are on the same local area network (LAN), and that the firewall allows communication on port 5000.
+- Please ensure safety before moving the robotic arm to avoid any collisions.
+- If you need to modify the port or the initial position, edit the corresponding parameters in [`main.py`](main.py).
 
-## 参考文献
+## References
 
-- [基于EKF的航姿解算(AHRS)](https://zhuanlan.zhihu.com/p/103617763)
+- [Attitude and Heading Reference System (AHRS) based on EKF](https://zhuanlan.zhihu.com/p/103617763)
