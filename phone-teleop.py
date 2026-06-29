@@ -5,36 +5,97 @@ import transforms3d as t3d
 from teleop import Teleop
 from piper_sdk import *
 
+# ── Phone orientation guide ────────────────────────────────────────────────────
+#
+#  HOW TO HOLD THE PHONE:
+#  ┌─────────────────────────────────────────────────────┐
+#  │  Hold the phone UPRIGHT, screen facing you,         │
+#  │  like reading a text message. That is the           │
+#  │  "natural" orientation ([0, 0, 0]).                  │
+#  │                                                     │
+#  │  Press and HOLD the on-screen "Move" button to      │
+#  │  enable motion. Release it to pause (pose is        │
+#  │  remembered). This lets you re-grip without drift.  │
+#  └─────────────────────────────────────────────────────┘
+#
+# ── GripperCtrl parameters ────────────────────────────────────────────────────
+#  GripperCtrl(gripper_angle, gripper_effort, gripper_code, set_zero)
+#    gripper_angle  : int, unit 0.001 mm (0 = open, 70_000 = fully closed ~70mm)
+#    gripper_effort : int, unit 0.001 N/m, range 0-5000
+#    gripper_code   : 0x00=disable, 0x01=enable, 0x02=disable+clear, 0x03=enable+clear
+#    set_zero       : 0x00=no-op, 0xAE=set current position as zero
+# ──────────────────────────────────────────────────────────────────────────────
 
-def pose_matrix_to_piper_ctl(pose: np.ndarray, position_scale_mm: float = 1000.0):
+GRIPPER_OPEN_POS   = 0        # fully open  (0.001 mm units)
+GRIPPER_CLOSED_POS = 70_000   # fully closed (~70 mm stroke)
+GRIPPER_EFFORT     = 1000     # 0.001 N/m — moderate grip force
+
+
+class PiperGripper:
     """
-    Convert a 4x4 SE(3) pose matrix to PiPER EndPoseCtrl parameters.
+    Thin wrapper around piper_sdk GripperCtrl.
+    Sends commands only on state transitions to avoid spamming the CAN bus.
+    """
+    def __init__(self, robot):
+        self._robot = robot
+        self._last_state: str | None = None   # 'open' or 'close'
 
-    The teleop package delivers pose in metres (FLU convention).
+    def update(self, state: str) -> None:
+        """Call with 'open' or 'close' each teleop callback tick."""
+        if state == self._last_state:
+            return                             # no change – skip
+        self._last_state = state
+        if state == "close":
+            pos = GRIPPER_CLOSED_POS
+        else:
+            pos = GRIPPER_OPEN_POS
+        print(f"Gripper → {'CLOSE' if state == 'close' else 'OPEN'} ({pos})")
+        # gripper_code=0x01 is REQUIRED to enable the gripper actuator
+        self._robot.GripperCtrl(pos, GRIPPER_EFFORT, 0x01, 0)
+
+
+def read_current_pose(robot) -> np.ndarray:
+    """
+    Read the current end-effector pose from the robot and return it as a 4×4
+    SE(3) matrix in metres (FLU convention), suitable for teleop.set_pose().
+
+    EndPoseMsgs fields are in 0.001 mm (XYZ) and 0.001 deg (RX/RY/RZ).
+    """
+    msgs = robot.GetArmEndPoseMsgs()
+    # msgs.end_pose has: X_axis, Y_axis, Z_axis (0.001 mm)
+    #                    RX_axis, RY_axis, RZ_axis (0.001 deg)
+    ep = msgs.end_pose
+    x_m  = ep.X_axis  * 1e-6   # 0.001 mm → metres
+    y_m  = ep.Y_axis  * 1e-6
+    z_m  = ep.Z_axis  * 1e-6
+    rx_r = math.radians(ep.RX_axis * 1e-3)   # 0.001 deg → radians
+    ry_r = math.radians(ep.RY_axis * 1e-3)
+    rz_r = math.radians(ep.RZ_axis * 1e-3)
+
+    R = t3d.euler.euler2mat(rx_r, ry_r, rz_r, axes='sxyz')
+    pose = np.eye(4)
+    pose[:3, :3] = R
+    pose[:3, 3]  = [x_m, y_m, z_m]
+    return pose
+
+
+def pose_matrix_to_piper_ctl(pose: np.ndarray):
+    """
+    Convert a 4×4 SE(3) pose matrix (metres, FLU) to PiPER EndPoseCtrl ints.
+
     PiPER EndPoseCtrl expects:
-      X, Y, Z  – in 0.001 mm  (i.e. metres * 1_000_000)
-      RX, RY, RZ – in 0.001 deg (i.e. degrees * 1000)
-
-    Args:
-        pose: 4x4 numpy transformation matrix (metres, FLU)
-        position_scale_mm: multiply position by this to map robot workspace;
-                           default 1000 maps 1 m phone motion → 1 m robot motion.
-
-    Returns:
-        (x, y, z, rx, ry, rz) tuple of integers ready for EndPoseCtrl
+      X, Y, Z    – int, unit 0.001 mm  (metres × 1_000_000)
+      RX, RY, RZ – int, unit 0.001 deg (degrees × 1000)
     """
     x_m, y_m, z_m = pose[:3, 3]
-
-    # Extract roll, pitch, yaw from the rotation matrix
-    # transforms3d uses (ai, aj, ak) = (roll, pitch, yaw) in 'sxyz' convention
     roll, pitch, yaw = t3d.euler.mat2euler(pose[:3, :3], axes='sxyz')
 
-    x   = round(x_m   * position_scale_mm * 1000)   # metres → 0.001 mm
-    y   = round(y_m   * position_scale_mm * 1000)
-    z   = round(z_m   * position_scale_mm * 1000)
-    rx  = round(math.degrees(roll)  * 1000)           # rad → 0.001 deg
-    ry  = round(math.degrees(pitch) * 1000)
-    rz  = round(math.degrees(yaw)   * 1000)
+    x  = round(x_m  * 1_000_000)
+    y  = round(y_m  * 1_000_000)
+    z  = round(z_m  * 1_000_000)
+    rx = round(math.degrees(roll)  * 1000)
+    ry = round(math.degrees(pitch) * 1000)
+    rz = round(math.degrees(yaw)   * 1000)
 
     return x, y, z, rx, ry, rz
 
@@ -44,58 +105,72 @@ if __name__ == "__main__":
     robot = C_PiperInterface_V2()
     robot.ConnectPort()
 
-    # Enable PiPER
+    # Enable all 6 joints + gripper (motor 7 = all)
     while not robot.EnablePiper():
         time.sleep(0.01)
 
-    # Set Cartesian end-pose control mode
-    mode = 0xAD
-    spd  = 10
-    robot.MotionCtrl_2(0x01, 0x00, spd, mode)
+    # Enable gripper actuator (must be done before any GripperCtrl position cmd)
+    robot.GripperCtrl(GRIPPER_OPEN_POS, GRIPPER_EFFORT, 0x01, 0)
     time.sleep(0.1)
-    robot.MotionCtrl_2(0x01, 0x00, spd, mode)
 
-    # Move to a safe initial position (X=0 mm, Y=0 mm, Z=500 mm, no rotation)
-    initial_position_m = np.array([0.0, 0.0, 0.5])   # metres
-    robot.EndPoseCtrl(
-        round(initial_position_m[0] * 1_000_000),     # X  (0.001 mm)
-        round(initial_position_m[1] * 1_000_000),     # Y
-        round(initial_position_m[2] * 1_000_000),     # Z
-        0,                                             # RX (0.001 deg)
-        0,                                             # RY
-        0,                                             # RZ
-    )
+    # Set end-pose control mode (MOVE P = 0x00, no MIT = 0x00)
+    # ── DO NOT move to a fixed initial position ─────────────────────────────
+    # The robot stays wherever it currently is.
+    # You should position it manually to a comfortable starting pose first.
+    spd = 30
+    robot.MotionCtrl_2(0x01, 0x00, spd, 0x00)
+    time.sleep(0.1)
+    robot.MotionCtrl_2(0x01, 0x00, spd, 0x00)
 
-    # Build the initial 4×4 pose to hand to the teleop package
-    initial_pose = np.eye(4)
-    initial_pose[:3, 3] = initial_position_m
+    # Read the current end-effector pose so teleop starts from where we are
+    time.sleep(0.2)   # give the CAN bus time to return state
+    initial_pose = read_current_pose(robot)
+    print(f"Starting pose (metres):\n{np.round(initial_pose, 4)}")
+
+    gripper = PiperGripper(robot)
 
     # ── Teleop setup ───────────────────────────────────────────────────────────
-    # The Teleop class starts an HTTPS server that serves a WebXR page.
-    # Open https://<your-PC-IP>:4443 on your phone browser to start streaming.
-    # No paid app required – the phone's motion sensor data is sent via WebSocket.
+    # Open https://<your-PC-IP>:4443 in your phone browser.
+    # Hold the phone UPRIGHT (portrait, screen facing you) – neutral pose.
+    # Press and hold "Move" on screen to enable arm motion.
 
     def on_pose(pose: np.ndarray, message: dict) -> None:
         """
-        Called every time the phone sends a new pose update.
+        Called on every WebXR frame (~100 Hz).
 
-        pose    – 4×4 SE(3) transformation matrix (metres, FLU convention)
-        message – raw message dict from the WebXR frontend
+        pose    – 4×4 SE(3) matrix (metres, FLU)
+        message – raw dict from phone:
+                    'move'    : bool  – True while Move button is held
+                    'gripper' : str   – 'open' or 'close'
+                    'scale'   : float – motion scale (0.2 … 1.0)
         """
-        print("─" * 60)
-        print(f"Pose matrix (metres / FLU):\n{np.round(pose, 4)}")
+        # ── Gripper ────────────────────────────────────────────────────────────
+        gripper_state = message.get("gripper", "open")
+        gripper.update(gripper_state)
 
+        # ── Arm pose ───────────────────────────────────────────────────────────
         x, y, z, rx, ry, rz = pose_matrix_to_piper_ctl(pose)
-        print(f"PiPER EndPoseCtrl → X={x}, Y={y}, Z={z}, RX={rx}, RY={ry}, RZ={rz}")
 
+        moving = message.get("move", False)
+        print(
+            f"{'MOVE' if moving else 'HOLD'} | "
+            f"X={x:+8d} Y={y:+8d} Z={z:+8d} | "
+            f"RX={rx:+7d} RY={ry:+7d} RZ={rz:+7d} | "
+            f"Gripper={gripper_state}"
+        )
+
+        # Re-send the mode command every tick – same pattern as official SDK demo
+        robot.MotionCtrl_2(0x01, 0x00, spd, 0x00)
         robot.EndPoseCtrl(x, y, z, rx, ry, rz)
 
     teleop = Teleop(
         host="0.0.0.0",
         port=4443,
+        # Phone held UPRIGHT (portrait, screen toward you) = zero pose.
+        natural_phone_orientation_euler=[0, 0, 0],
     )
-    teleop.set_pose(initial_pose)   # tell the teleop lib the robot's current pose
+    teleop.set_pose(initial_pose)
     teleop.subscribe(on_pose)
 
-    # run() is blocking – it starts the uvicorn HTTPS server
+    # run() is blocking – starts the uvicorn HTTPS server
     teleop.run()
