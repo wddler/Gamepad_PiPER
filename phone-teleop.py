@@ -1,240 +1,101 @@
-import asyncio
-import websockets
-import socket
-import json
 import math
 import time
 import numpy as np
+import transforms3d as t3d
+from teleop import Teleop
 from piper_sdk import *
 
 
-def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(('10.255.255.255', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
+def pose_matrix_to_piper_ctl(pose: np.ndarray, position_scale_mm: float = 1000.0):
+    """
+    Convert a 4x4 SE(3) pose matrix to PiPER EndPoseCtrl parameters.
 
-def quat_from_euler(pitch, roll, yaw):
-    cy = np.cos(yaw * 0.5)
-    sy = np.sin(yaw * 0.5)
-    cp = np.cos(pitch * 0.5)
-    sp = np.sin(pitch * 0.5)
-    cr = np.cos(roll * 0.5)
-    sr = np.sin(roll * 0.5)
-    q0 = cy * cp * cr + sy * sp * sr
-    q1 = cy * sp * cr + sy * cp * sr
-    q2 = sy * cp * cr - cy * sp * sr
-    q3 = cy * cp * sr - sy * sp * cr
-    return np.array([q0, q1, q2, q3])
+    The teleop package delivers pose in metres (FLU convention).
+    PiPER EndPoseCtrl expects:
+      X, Y, Z  – in 0.001 mm  (i.e. metres * 1_000_000)
+      RX, RY, RZ – in 0.001 deg (i.e. degrees * 1000)
 
-def euler_from_quat(q):
-    q0, q1, q2, q3 = q
-    roll = np.arctan2(2*(q0*q1 + q2*q3), 1 - 2*(q1*q1 + q2*q2))
-    pitch = np.arcsin(2*(q0*q2 - q3*q1))
-    yaw = np.arctan2(2*(q0*q3 + q1*q2), 1 - 2*(q2*q2 + q3*q3))
-    return pitch, roll, yaw
+    Args:
+        pose: 4x4 numpy transformation matrix (metres, FLU)
+        position_scale_mm: multiply position by this to map robot workspace;
+                           default 1000 maps 1 m phone motion → 1 m robot motion.
 
-def normalize_quat(q):
-    return q / np.linalg.norm(q)
+    Returns:
+        (x, y, z, rx, ry, rz) tuple of integers ready for EndPoseCtrl
+    """
+    x_m, y_m, z_m = pose[:3, 3]
 
+    # Extract roll, pitch, yaw from the rotation matrix
+    # transforms3d uses (ai, aj, ak) = (roll, pitch, yaw) in 'sxyz' convention
+    roll, pitch, yaw = t3d.euler.mat2euler(pose[:3, :3], axes='sxyz')
 
-class EKFAHRS:
-    def __init__(self):
-        # State vector: [q0, q1, q2, q3, bgx, bgy, bgz]
-        self.x = np.zeros(7)
-        self.x[0] = 1.0  # Initial quaternion
-        self.P = np.eye(7)
-        # Noise parameters
-        self.Q = np.diag([1e-6]*4 + [1e-8]*3)
-        self.R = np.diag([1e-1]*3)
-        self.g = 9.81
+    x   = round(x_m   * position_scale_mm * 1000)   # metres → 0.001 mm
+    y   = round(y_m   * position_scale_mm * 1000)
+    z   = round(z_m   * position_scale_mm * 1000)
+    rx  = round(math.degrees(roll)  * 1000)           # rad → 0.001 deg
+    ry  = round(math.degrees(pitch) * 1000)
+    rz  = round(math.degrees(yaw)   * 1000)
 
-    def set_init(self, acc, mag):
-        # acc: 3, mag: 3, units g and μT
-        acc = acc / np.linalg.norm(acc)
-        pitch = np.arcsin(-acc[0])
-        roll = np.arctan2(acc[1], acc[2])
-        # Initialize yaw using magnetometer
-        mx, my, mz = mag
-        mag_x = mx * np.cos(pitch) + my * np.sin(roll) * np.sin(pitch) + mz * np.cos(roll) * np.sin(pitch)
-        mag_y = my * np.cos(roll) - mz * np.sin(roll)
-        yaw = np.arctan2(-mag_y, mag_x)
-        q = quat_from_euler(pitch, roll, yaw)
-        self.x[:4] = normalize_quat(q)
-
-    def predict(self, gyro, dt):
-        # gyro: rad/s, dt: s
-        q = self.x[:4]
-        bg = self.x[4:]
-        omega = gyro - bg
-        wx, wy, wz = omega
-        Omega = np.array([
-            [0, -wx, -wy, -wz],
-            [wx, 0, wz, -wy],
-            [wy, -wz, 0, wx],
-            [wz, wy, -wx, 0]
-        ])
-        dq = 0.5 * Omega @ q
-        q_new = q + dq * dt
-        q_new = normalize_quat(q_new)
-        self.x[:4] = q_new
-        # Approximate state transition matrix
-        F = np.eye(7)
-        F[:4, :4] += 0.5 * Omega * dt
-        self.P = F @ self.P @ F.T + self.Q
-
-    def update(self, acc):
-        # acc: 3, unit g
-        q = self.x[:4]
-        # Observation model: acc = R(q)^T * [0,0,1]
-        hx = np.array([
-            2*(q[1]*q[3] - q[0]*q[2]),
-            2*(q[0]*q[1] + q[2]*q[3]),
-            q[0]**2 + q[3]**2 - q[1]**2 - q[2]**2
-        ])
-        acc = acc / np.linalg.norm(acc)
-        y = acc - hx
-        # Jacobian matrix
-        H = np.zeros((3,7))
-        q0, q1, q2, q3 = q
-        H[0,0] = -2*q2
-        H[0,1] = 2*q3
-        H[0,2] = -2*q0
-        H[0,3] = 2*q1
-        H[1,0] = 2*q1
-        H[1,1] = 2*q0
-        H[1,2] = 2*q3
-        H[1,3] = 2*q2
-        H[2,0] = 2*q0
-        H[2,1] = -2*q1
-        H[2,2] = -2*q2
-        H[2,3] = 2*q3
-        S = H @ self.P @ H.T + self.R
-        K = self.P @ H.T @ np.linalg.inv(S)
-        dx = K @ y
-        self.x += dx
-        self.x[:4] = normalize_quat(self.x[:4])
-        self.P = (np.eye(7) - K @ H) @ self.P
-
-    def get_euler(self):
-        return euler_from_quat(self.x[:4])
-
-
-async def echo(websocket, path):
-    global last_time, ekf_initialized
-    async for message in websocket:
-        try:
-            data = json.loads(message)
-            sensor_name = data.get("SensorName", "").lower()
-            timestamp = data.get("Timestamp", 0)
-
-            if sensor_name in sensor_data:
-                sensor_data[sensor_name]['x'] = float(data.get('x', 0))
-                sensor_data[sensor_name]['y'] = float(data.get('y', 0))
-                sensor_data[sensor_name]['z'] = float(data.get('z', 0))
-                sensor_data[sensor_name]['timestamp'] = timestamp
-
-                # Check if all three types of data are fresh
-                accel_ts = sensor_data['accelerometer']['timestamp']
-                gyro_ts = sensor_data['gyroscope']['timestamp']
-                mag_ts = sensor_data['magnetometer']['timestamp']
-                if abs(accel_ts - gyro_ts) < 100 and abs(accel_ts - mag_ts) < 100:
-                    current_time = time.time()
-                    dt = current_time - last_time
-                    last_time = current_time
-
-                    # Unit Explanation:
-                    # Accelerometer ax, ay, az units are g (gravity)
-                    # Gyroscope gx, gy, gz units are rad/s
-                    # Magnetometer mx, my, mz units are μT
-                    gx = sensor_data['gyroscope']['x']
-                    gy = sensor_data['gyroscope']['y']
-                    gz = sensor_data['gyroscope']['z']
-                    ax = sensor_data['accelerometer']['x']
-                    ay = sensor_data['accelerometer']['y']
-                    az = sensor_data['accelerometer']['z']
-                    mx = sensor_data['magnetometer']['x']
-                    my = sensor_data['magnetometer']['y']
-                    mz = sensor_data['magnetometer']['z']
-
-                    # EKF Initialization
-                    if not ekf_initialized:
-                        ekf.set_init(np.array([ax, ay, az]), np.array([mx, my, mz]))
-                        ekf_initialized = True
-
-                    # EKF Calculation
-                    ekf.predict(np.array([gx, gy, gz]), dt)
-                    ekf.update(np.array([ax, ay, az]))
-                    epitch, eroll, eyaw = ekf.get_euler()
-                    print(f"EKF - Roll: {math.degrees(eroll):.2f}, Pitch: {math.degrees(epitch):.2f}, Yaw: {math.degrees(eyaw):.2f}")
-
-                    # Send results to the robotic arm
-                    ctl = [round(initial_position[0] * 1000),
-                           round(initial_position[1] * 1000),
-                           round(initial_position[2] * 1000),
-                           round(math.degrees(eroll) * 1000),
-                           round(math.degrees(epitch) * 1000),
-                           round(math.degrees(eyaw) * 1000)]
-                    robot.EndPoseCtrl(*ctl)
-
-        except Exception as e:
-            print(f"Error: {e}")
-
-async def main():
-    port = 5000
-    async with websockets.serve(echo, '0.0.0.0', port, max_size=1_000_000_000):
-        await asyncio.Future()
+    return x, y, z, rx, ry, rz
 
 
 if __name__ == "__main__":
+    # ── Robot setup ────────────────────────────────────────────────────────────
     robot = C_PiperInterface_V2()
     robot.ConnectPort()
 
-    # Enable Piper
+    # Enable PiPER
     while not robot.EnablePiper():
         time.sleep(0.01)
-        
-    # Set control mode
+
+    # Set Cartesian end-pose control mode
     mode = 0xAD
-    spd = 100
+    spd  = 10
     robot.MotionCtrl_2(0x01, 0x00, spd, mode)
     time.sleep(0.1)
     robot.MotionCtrl_2(0x01, 0x00, spd, mode)
 
-    # Set initial position
-    initial_position = [0, 0, 500]  # X, Y, Z (0.001mm)
-    # Send initial position to the robotic arm
+    # Move to a safe initial position (X=0 mm, Y=0 mm, Z=500 mm, no rotation)
+    initial_position_m = np.array([0.0, 0.0, 0.5])   # metres
     robot.EndPoseCtrl(
-                    initial_position[0] * 1000,     # X
-                    initial_position[1] * 1000,     # Y
-                    initial_position[2] * 1000,     # Z
-                    0 * 1000,                       # RX
-                    0 * 1000,                       # RY
-                    0 * 1000                        # RZ
-                )
-    
-    # Sensor data cache
-    sensor_data = {
-        'accelerometer': {'x': 0.0, 'y': 0.0, 'z': 0.0, 'timestamp': 0},
-        'gyroscope': {'x': 0.0, 'y': 0.0, 'z': 0.0, 'timestamp': 0},
-        'magnetometer': {'x': 0.0, 'y': 0.0, 'z': 0.0, 'timestamp': 0},
-    }
+        round(initial_position_m[0] * 1_000_000),     # X  (0.001 mm)
+        round(initial_position_m[1] * 1_000_000),     # Y
+        round(initial_position_m[2] * 1_000_000),     # Z
+        0,                                             # RX (0.001 deg)
+        0,                                             # RY
+        0,                                             # RZ
+    )
 
-    last_time = time.time()
-    ekf = EKFAHRS()
-    ekf_initialized = False
-    
-    hostname = socket.gethostname()
-    IPAddr = get_ip()
-    port = 5000
-    print("Your Computer Name is: " + hostname)
-    print("Your Computer IP Address is: " + IPAddr)
-    print("* Enter {0}:{1} in the app.\n* Press the 'Set IP Address' button.\n* Select the sensors to stream.\n* Update the 'update interval' by entering a value in ms.".format(IPAddr, port))
+    # Build the initial 4×4 pose to hand to the teleop package
+    initial_pose = np.eye(4)
+    initial_pose[:3, 3] = initial_position_m
 
-    # Start WebSocket server
-    asyncio.run(main())
+    # ── Teleop setup ───────────────────────────────────────────────────────────
+    # The Teleop class starts an HTTPS server that serves a WebXR page.
+    # Open https://<your-PC-IP>:4443 on your phone browser to start streaming.
+    # No paid app required – the phone's motion sensor data is sent via WebSocket.
+
+    def on_pose(pose: np.ndarray, message: dict) -> None:
+        """
+        Called every time the phone sends a new pose update.
+
+        pose    – 4×4 SE(3) transformation matrix (metres, FLU convention)
+        message – raw message dict from the WebXR frontend
+        """
+        print("─" * 60)
+        print(f"Pose matrix (metres / FLU):\n{np.round(pose, 4)}")
+
+        x, y, z, rx, ry, rz = pose_matrix_to_piper_ctl(pose)
+        print(f"PiPER EndPoseCtrl → X={x}, Y={y}, Z={z}, RX={rx}, RY={ry}, RZ={rz}")
+
+        robot.EndPoseCtrl(x, y, z, rx, ry, rz)
+
+    teleop = Teleop(
+        host="0.0.0.0",
+        port=4443,
+    )
+    teleop.set_pose(initial_pose)   # tell the teleop lib the robot's current pose
+    teleop.subscribe(on_pose)
+
+    # run() is blocking – it starts the uvicorn HTTPS server
+    teleop.run()
