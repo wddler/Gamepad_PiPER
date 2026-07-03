@@ -29,43 +29,74 @@ from piper_sdk import *
 GRIPPER_OPEN_POS   = 0        # fully open  (0.001 mm units)
 GRIPPER_CLOSED_POS = 70_000   # fully closed (~70 mm stroke)
 GRIPPER_EFFORT     = 1000     # 0.001 N/m — moderate grip force
+GRIPPER_STEP       = 2_000    # 0.001 mm per frame ≈ 2 mm/frame while held
 
 
 class PiperGripper:
     """
-    Thin wrapper around piper_sdk GripperCtrl.
-    Sends commands only on state transitions to avoid spamming the CAN bus.
+    Gripper controller supporting:
+      - Binary toggle  : 'open' / 'close' from the gripper toggle button
+      - Gradual open   : button A held → decrements position toward 0
+      - Gradual close  : button B held → increments position toward GRIPPER_CLOSED_POS
+
+    Sends GripperCtrl only when the position actually changes.
     """
     def __init__(self, robot):
         self._robot = robot
-        self._last_state: str | None = None   # 'open' or 'close'
+        self._pos: int = GRIPPER_OPEN_POS      # current position (0.001 mm)
+        self._last_sent_pos: int | None = None  # last position sent to robot
 
-    def update(self, state: str) -> None:
-        """Call with 'open' or 'close' each teleop callback tick."""
-        if state == self._last_state:
-            return                             # no change – skip
-        self._last_state = state
-        if state == "close":
-            pos = GRIPPER_CLOSED_POS
-        else:
-            pos = GRIPPER_OPEN_POS
-        print(f"Gripper → {'CLOSE' if state == 'close' else 'OPEN'} ({pos})")
-        # gripper_code=0x01 is REQUIRED to enable the gripper actuator
+    def _send(self, pos: int) -> None:
+        pos = max(GRIPPER_OPEN_POS, min(GRIPPER_CLOSED_POS, pos))
+        if pos == self._last_sent_pos:
+            return
+        self._pos = pos
+        self._last_sent_pos = pos
+        print(f"Gripper pos={pos}")
         self._robot.GripperCtrl(pos, GRIPPER_EFFORT, 0x01, 0)
 
+    @property
+    def pos(self) -> int:
+        return self._pos
 
-def read_current_pose(robot) -> np.ndarray:
+    def update(self, state: str, btn_a: bool, btn_b: bool) -> None:
+        """
+        Call every teleop frame.
+
+        state – 'open' or 'close' from the binary toggle button
+        btn_a – True while A is held  → gradually OPEN  (position decreases)
+        btn_b – True while B is held  → gradually CLOSE (position increases)
+        """
+        if btn_a:
+            self._send(self._pos - GRIPPER_STEP)
+        elif btn_b:
+            self._send(self._pos + GRIPPER_STEP)
+        else:
+            # Binary toggle: only act on transitions
+            target = GRIPPER_OPEN_POS if state == "open" else GRIPPER_CLOSED_POS
+            self._send(target)
+
+
+def read_current_pose(robot, retries: int = 20, delay: float = 0.1) -> np.ndarray:
     """
     Read the current end-effector pose from the robot and return it as a 4×4
     SE(3) matrix in metres (FLU convention), suitable for teleop.set_pose().
 
-    EndPoseMsgs fields are in 0.001 mm (XYZ) and 0.001 deg (RX/RY/RZ).
+    Retries until the CAN bus returns a non-zero Z position (the arm needs
+    a moment after enabling before feedback is available).
+
+    EndPoseMsgs fields: X/Y/Z in 0.001 mm, RX/RY/RZ in 0.001 deg.
     """
-    msgs = robot.GetArmEndPoseMsgs()
-    # msgs.end_pose has: X_axis, Y_axis, Z_axis (0.001 mm)
-    #                    RX_axis, RY_axis, RZ_axis (0.001 deg)
-    ep = msgs.end_pose
-    x_m  = ep.X_axis  * 1e-6   # 0.001 mm → metres
+    for attempt in range(retries):
+        msgs = robot.GetArmEndPoseMsgs()
+        ep = msgs.end_pose
+        # Z == 0 almost certainly means feedback not ready yet
+        if ep.Z_axis != 0:
+            break
+        print(f"Waiting for arm pose feedback… ({attempt+1}/{retries})")
+        time.sleep(delay)
+
+    x_m  = ep.X_axis  * 1e-6          # 0.001 mm → metres
     y_m  = ep.Y_axis  * 1e-6
     z_m  = ep.Z_axis  * 1e-6
     rx_r = math.radians(ep.RX_axis * 1e-3)   # 0.001 deg → radians
@@ -145,8 +176,13 @@ if __name__ == "__main__":
                     'scale'   : float – motion scale (0.2 … 1.0)
         """
         # ── Gripper ────────────────────────────────────────────────────────────
+        # Toggle button: 'open' / 'close'
+        # A button (hold): gradually open   (position decreases)
+        # B button (hold): gradually close  (position increases)
         gripper_state = message.get("gripper", "open")
-        gripper.update(gripper_state)
+        btn_a = bool(message.get("reservedButtonA", False))
+        btn_b = bool(message.get("reservedButtonB", False))
+        gripper.update(gripper_state, btn_a, btn_b)
 
         # ── Arm pose ───────────────────────────────────────────────────────────
         x, y, z, rx, ry, rz = pose_matrix_to_piper_ctl(pose)
@@ -156,7 +192,7 @@ if __name__ == "__main__":
             f"{'MOVE' if moving else 'HOLD'} | "
             f"X={x:+8d} Y={y:+8d} Z={z:+8d} | "
             f"RX={rx:+7d} RY={ry:+7d} RZ={rz:+7d} | "
-            f"Gripper={gripper_state}"
+            f"Grip={gripper.pos} A={btn_a} B={btn_b}"
         )
 
         # Re-send the mode command every tick – same pattern as official SDK demo
